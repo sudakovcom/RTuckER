@@ -7,7 +7,7 @@ from model import *
 from torch.optim.lr_scheduler import ExponentialLR
 import argparse
 
-from model import SFTuckER, RSGDwithMomentum, RGD
+from model import SFTuckER, RGD, RSGDwithMomentum, SFTuckerAdam
 
 
 def get_loss_fn(e_idx, r_idx, targets, criterion):
@@ -118,7 +118,7 @@ class Experiment:
 
         model.init()
 
-        opt = RGD(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
+        opt = RSGDwithMomentum(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
         if self.decay_rate:
             scheduler = ExponentialLR(opt, self.decay_rate)
 
@@ -171,16 +171,12 @@ if __name__ == '__main__':
 
     dataset = "FB15k-237"
     num_iterations = 500
-    batch_size = 128
-    lr = 0.0005
+    batch_size = 2048
+    lr = 1e9
     df = 1.0
     edim = 200
     rdim = 200
-    cuda = True
     label_smoothing = 0.1
-    input_dropout = None
-    hidden_dropout1 = None
-    hidden_dropout2 = None
 
     parser.add_argument("--dataset", type=str, default="FB15k-237", nargs="?",
                         help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
@@ -196,14 +192,6 @@ if __name__ == '__main__':
                         help="Entity embedding dimensionality.")
     parser.add_argument("--rdim", type=int, default=200, nargs="?",
                         help="Relation embedding dimensionality.")
-    parser.add_argument("--cuda", type=bool, default=False, nargs="?",
-                        help="Whether to use cuda (GPU) or not (CPU).")
-    parser.add_argument("--input_dropout", type=float, default=0.3, nargs="?",
-                        help="Input layer dropout.")
-    parser.add_argument("--hidden_dropout1", type=float, default=0.4, nargs="?",
-                        help="Dropout after the first hidden layer.")
-    parser.add_argument("--hidden_dropout2", type=float, default=0.5, nargs="?",
-                        help="Dropout after the second hidden layer.")
     parser.add_argument("--label_smoothing", type=float, default=0.1, nargs="?",
                         help="Amount of label smoothing.")
 

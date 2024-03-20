@@ -7,10 +7,10 @@ from tucker_riemopt import SFTucker
 from torch.optim import Optimizer
 from tucker_riemopt import SFTuckerRiemannian
 
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class SFTuckER:
     def __init__(self, d, d1, d2, **kwargs):
-        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         self.rank = (d2, d1, d1)
         self.E = torch.rand((len(d.entities), d1), device=device)
         self.R = torch.rand((len(d.relations), d2), device=device)
@@ -47,17 +47,12 @@ class RGD(Optimizer):
         params = model_parameters
         super().__init__(params, defaults)
 
-    def fit(self, loss_fn, model, normalize_grad=False):
+    def fit(self, loss_fn, model):
         x_k = SFTucker(model.W.data, [model.R.data], num_shared_factors=2, shared_factor=model.E.data)
         rgrad, self.loss = SFTuckerRiemannian.grad(loss_fn, x_k)
         rgrad_norm = rgrad.norm().detach()
 
-        if normalize_grad:
-            normalizer = normalize_grad / rgrad_norm
-        else:
-            normalizer = 1
-
-        self.direction = normalizer * rgrad
+        self.direction = rgrad
         return rgrad_norm
 
     @torch.no_grad()
@@ -74,25 +69,28 @@ class RGD(Optimizer):
 
 
 class RSGDwithMomentum(RGD):
-    def __init__(self, params, rank, max_lr, momentum_beta=0.9):
+    def __init__(self, params, rank, max_lr, weight_decay = 0, momentum = 0.9, dampening = 0):
         super().__init__(params, rank, max_lr)
-        self.momentum_beta = momentum_beta
-        self.momentum = None
 
-    def fit(self, loss_fn, x_k: SFTuckerRiemannian, normalize_grad=False):
-        if self.direction is not None:
-            self.momentum = SFTuckerRiemannian.project(x_k, self.direction)
-        else:
-            self.momentum = SFTuckerRiemannian.TangentVector(x_k, torch.zeros_like(x_k.core))
+        self.b = None
+        self.weight_decay = weight_decay
+        self.momentum = momentum
+        self.dampening = dampening
+
+    def fit(self, loss_fn, model: SFTuckerRiemannian):
+        x_k = SFTucker(model.W.data, [model.R.data], num_shared_factors=2, shared_factor=model.E.data)
         rgrad, self.loss = SFTuckerRiemannian.grad(loss_fn, x_k)
         rgrad_norm = rgrad.norm().detach()
 
-        if normalize_grad:
-            normalizer = normalize_grad / rgrad_norm
+        if self.b is not None:
+            self.b = SFTuckerRiemannian.project(x_k, self.b)
+            self.b = self.momentum * self.b + (1 - self.momentum) * rgrad
         else:
-            normalizer = 1
+            self.b = rgrad
 
-        self.direction = normalizer * rgrad + self.momentum_beta * self.momentum
+        self.direction = self.b
+        self.b = self.b.construct()
+
         return rgrad_norm
 
     @torch.no_grad()
@@ -102,8 +100,37 @@ class RSGDwithMomentum(RGD):
         x_k = self.direction.point
         x_k = (-self.param_groups[0]["lr"]) * self.direction + SFTuckerRiemannian.TangentVector(x_k)
         x_k = x_k.construct().round(self.rank)
-        self.direction = self.direction.construct()
 
         W.data.add_(x_k.core - W)
         R.data.add_(x_k.regular_factors[0] - R)
         E.data.add_(x_k.shared_factor - E)
+
+
+class SFTuckerAdam(RGD):
+    def __init__(self, params, rank, max_lr, betas=(0.9, 0.999), eps=1e-8, step_velocity=1):
+        super().__init__(params, rank, max_lr)
+        self.betas = betas
+        self.eps = eps
+        self.step_velocity = step_velocity
+        
+        self.momentum = None
+        self.second_momentum = torch.zeros(1, device="cuda")
+        
+        self.step_t = 1
+
+    def fit(self, loss_fn, model, normalize_grad = 1.):
+        x_k = SFTucker(model.W.data, [model.R.data], num_shared_factors=2, shared_factor=model.E.data)
+        rgrad, self.loss = SFTuckerRiemannian.grad(loss_fn, x_k)
+        rgrad_norm = rgrad.norm().detach()
+        if self.momentum is not None:
+            self.momentum = SFTuckerRiemannian.project(x_k, self.momentum.construct())
+            self.momentum = self.betas[0] * self.momentum + (1 - self.betas[0]) * rgrad
+        else:
+            self.momentum = (1 - self.betas[0]) * rgrad
+        self.second_momentum = self.betas[1] * self.second_momentum + (1 - self.betas[1]) * rgrad_norm ** 2
+        second_momentum_corrected = self.second_momentum / (1 - self.betas[1] ** (self.step_t // self.step_velocity + 1))
+        bias_correction_ratio = (1 - self.betas[0] ** (self.step_t // self.step_velocity + 1)) * torch.sqrt(
+            second_momentum_corrected
+        ) + self.eps
+        self.direction = (1 / bias_correction_ratio) * self.momentum
+        return rgrad_norm
