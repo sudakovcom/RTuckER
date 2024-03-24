@@ -5,7 +5,6 @@ import time
 from collections import defaultdict
 from model import *
 from torch.optim.lr_scheduler import ExponentialLR
-import argparse
 
 from model import SFTuckER, RGD, RSGDwithMomentum, SFTuckerAdam
 
@@ -24,8 +23,7 @@ def get_loss_fn(e_idx, r_idx, targets, criterion):
 
 class Experiment:
     def __init__(self, learning_rate=0.0005, ent_vec_dim=200, rel_vec_dim=200,
-                 num_iterations=500, batch_size=128, decay_rate=0., cuda=False,
-                 input_dropout=0.3, hidden_dropout1=0.4, hidden_dropout2=0.5,
+                 num_iterations=500, batch_size=128, decay_rate=0.,
                  label_smoothing=0.):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
@@ -34,9 +32,6 @@ class Experiment:
         self.batch_size = batch_size
         self.decay_rate = decay_rate
         self.label_smoothing = label_smoothing
-        self.cuda = cuda
-        self.kwargs = {"input_dropout": input_dropout, "hidden_dropout1": hidden_dropout1,
-                       "hidden_dropout2": hidden_dropout2}
 
     def get_data_idxs(self, data):
         data_idxs = [(self.entity_idxs[data[i][0]], self.relation_idxs[data[i][1]], self.entity_idxs[data[i][2]]) for i
@@ -54,9 +49,7 @@ class Experiment:
         targets = np.zeros((len(batch), len(d.entities)))
         for idx, pair in enumerate(batch):
             targets[idx, er_vocab[pair]] = 1.
-        targets = torch.FloatTensor(targets)
-        if self.cuda:
-            targets = targets.cuda()
+        targets = torch.FloatTensor(targets).to(device)
         return np.array(batch), targets
 
     def evaluate(self, model, data):
@@ -72,13 +65,9 @@ class Experiment:
 
         for i in range(0, len(test_data_idxs), self.batch_size):
             data_batch, _ = self.get_batch(er_vocab, test_data_idxs, i)
-            e1_idx = torch.tensor(data_batch[:, 0])
-            r_idx = torch.tensor(data_batch[:, 1])
-            e2_idx = torch.tensor(data_batch[:, 2])
-            if self.cuda:
-                e1_idx = e1_idx.cuda()
-                r_idx = r_idx.cuda()
-                e2_idx = e2_idx.cuda()
+            e1_idx = torch.tensor(data_batch[:, 0]).to(device)
+            r_idx = torch.tensor(data_batch[:, 1]).to(device)
+            e2_idx = torch.tensor(data_batch[:, 2]).to(device)
             predictions = model.forward(e1_idx, r_idx)
 
             for j in range(data_batch.shape[0]):
@@ -114,7 +103,7 @@ class Experiment:
         train_data_idxs = self.get_data_idxs(d.train_data)
         print("Number of training data points: %d" % len(train_data_idxs))
 
-        model = SFTuckER(d, self.ent_vec_dim, self.rel_vec_dim, **self.kwargs)
+        model = SFTuckER(d, self.ent_vec_dim, self.rel_vec_dim)
 
         model.init()
 
@@ -133,11 +122,8 @@ class Experiment:
             for j in range(0, len(er_vocab_pairs), self.batch_size):
                 data_batch, targets = self.get_batch(er_vocab, er_vocab_pairs, j)
                 opt.zero_grad()
-                e1_idx = torch.tensor(data_batch[:, 0])
-                r_idx = torch.tensor(data_batch[:, 1])
-                if self.cuda:
-                    e1_idx = e1_idx.cuda()
-                    r_idx = r_idx.cuda()
+                e1_idx = torch.tensor(data_batch[:, 0]).to(device)
+                r_idx = torch.tensor(data_batch[:, 1]).to(device)
 
                 if self.label_smoothing:
                     targets = ((1.0 - self.label_smoothing) * targets) + (1.0 / targets.size(1))
@@ -167,36 +153,17 @@ class Experiment:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
 
     dataset = "FB15k-237"
     num_iterations = 500
-    batch_size = 2048
+    batch_size = 8
     lr = 1e9
-    df = 1.0
+    dr = 0.995
     edim = 200
     rdim = 200
     label_smoothing = 0.1
 
-    parser.add_argument("--dataset", type=str, default="FB15k-237", nargs="?",
-                        help="Which dataset to use: FB15k, FB15k-237, WN18 or WN18RR.")
-    parser.add_argument("--num_iterations", type=int, default=500, nargs="?",
-                        help="Number of iterations.")
-    parser.add_argument("--batch_size", type=int, default=128, nargs="?",
-                        help="Batch size.")
-    parser.add_argument("--lr", type=float, default=0.0005, nargs="?",
-                        help="Learning rate.")
-    parser.add_argument("--dr", type=float, default=1.0, nargs="?",
-                        help="Decay rate.")
-    parser.add_argument("--edim", type=int, default=200, nargs="?",
-                        help="Entity embedding dimensionality.")
-    parser.add_argument("--rdim", type=int, default=200, nargs="?",
-                        help="Relation embedding dimensionality.")
-    parser.add_argument("--label_smoothing", type=float, default=0.1, nargs="?",
-                        help="Amount of label smoothing.")
-
-    args = parser.parse_args()
-    dataset = args.dataset
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     data_dir = "data/%s/" % dataset
     torch.backends.cudnn.deterministic = True
     seed = 20
@@ -205,8 +172,6 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     d = Data(data_dir=data_dir, reverse=True)
-    experiment = Experiment(num_iterations=args.num_iterations, batch_size=args.batch_size, learning_rate=args.lr,
-                            decay_rate=args.dr, ent_vec_dim=args.edim, rel_vec_dim=args.rdim, cuda=args.cuda,
-                            input_dropout=args.input_dropout, hidden_dropout1=args.hidden_dropout1,
-                            hidden_dropout2=args.hidden_dropout2, label_smoothing=args.label_smoothing)
+    experiment = Experiment(num_iterations=num_iterations, batch_size=batch_size, learning_rate=lr,
+                            decay_rate=dr, ent_vec_dim=edim, rel_vec_dim=rdim, label_smoothing=label_smoothing)
     experiment.train_and_eval()
