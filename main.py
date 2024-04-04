@@ -2,11 +2,12 @@ from load_data import Data
 import numpy as np
 import torch
 import time
+import wandb
 from collections import defaultdict
 from model import *
 from torch.optim.lr_scheduler import ExponentialLR
 
-from model import SFTuckER, RGD, RSGDwithMomentum, SFTuckerAdam
+from model import SFTuckER, SGD
 
 
 def get_loss_fn(e_idx, r_idx, targets, criterion):
@@ -89,6 +90,11 @@ class Experiment:
                     else:
                         hits[hits_level].append(0.0)
 
+        wandb.log({'Hits @10': np.mean(hits[9]),
+                   'Hits @3': np.mean(hits[2]),
+                   'Hits @1': np.mean(hits[0]),
+                   'Mean reciprocal rank': np.mean(1. / np.array(ranks))})
+
         print('Hits @10: {0}'.format(np.mean(hits[9])))
         print('Hits @3: {0}'.format(np.mean(hits[2])))
         print('Hits @1: {0}'.format(np.mean(hits[0])))
@@ -107,7 +113,7 @@ class Experiment:
 
         model.init()
 
-        opt = RSGDwithMomentum(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
+        opt = SGD(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
         if self.decay_rate:
             scheduler = ExponentialLR(opt, self.decay_rate)
 
@@ -129,8 +135,9 @@ class Experiment:
                     targets = ((1.0 - self.label_smoothing) * targets) + (1.0 / targets.size(1))
 
                 loss_fn = get_loss_fn(e1_idx, r_idx, targets, model.criterion)
-                grad_norm = opt.fit(loss_fn, model)
+                opt.fit(loss_fn, model)
                 opt.step()
+                wandb.log({'W norm': model.W.norm(), 'E norm': model.E.norm(), 'R norm': model.R.norm()})
                 opt.zero_grad(set_to_none=True)
 
                 loss = opt.loss.detach()
@@ -142,6 +149,7 @@ class Experiment:
             print(it)
             print(time.time() - start_train)
             print(np.mean(losses))
+            wandb.log({'train_loss': np.mean(losses)})
             with torch.no_grad():
                 print("Validation:")
                 self.evaluate(model, d.valid_data)
@@ -156,7 +164,7 @@ if __name__ == '__main__':
 
     dataset = "FB15k-237"
     num_iterations = 500
-    batch_size = 8
+    batch_size = 2048
     lr = 1e9
     dr = 0.995
     edim = 200
@@ -172,6 +180,9 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
     d = Data(data_dir=data_dir, reverse=True)
+
+    run = wandb.init(project="RTuckER")
+
     experiment = Experiment(num_iterations=num_iterations, batch_size=batch_size, learning_rate=lr,
                             decay_rate=dr, ent_vec_dim=edim, rel_vec_dim=rdim, label_smoothing=label_smoothing)
     experiment.train_and_eval()
