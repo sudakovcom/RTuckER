@@ -87,3 +87,52 @@ class SGD(Optimizer):
         W.data.add_(x_k.core - W)
         R.data.add_(x_k.regular_factors[0] - R)
         E.data.add_(x_k.shared_factor - E)
+
+
+class Adam(Optimizer):
+    def __init__(self, params, rank, max_lr, betas=(0.9, 0.99), eps=1e-8):
+        self.rank = rank
+        self.lr = lr
+        self.betas = betas
+        self.eps = eps
+        
+        self.b = None
+        self.v = 0
+        self.k = 0
+        
+        self.step_t = 1
+        
+        defaults = dict(rank=rank, lr=self.lr)
+        super().__init__(params, defaults)
+
+    def fit(self, loss_fn, model: SFTuckerRiemannian):
+        x_k = SFTucker(model.W.data, [model.R.data], num_shared_factors=2, shared_factor=model.E.data)
+        rgrad, self.loss = SFTuckerRiemannian.grad(loss_fn, x_k)
+        rgrad_norm = rgrad.norm()
+        
+        self.k = np.sqrt(1 - self.betas[1]**self.step_t)/(1 - self.betas[0]**self.step_t)
+        self.v = self.betas[1]*self.v + (1 - self.betas[1])*rgrad_norm**2
+        
+        if self.b is not None:
+            self.b.point = x_k
+            self.b = SFTuckerRiemannian.project(x_k, self.b.construct())
+            self.b = self.betas[0]*self.b + (1 - self.betas[0])*rgrad
+        else:
+            self.b = (1 - self.betas[0])*rgrad
+
+        self.direction = (self.k/(torch.sqrt(self.v + self.eps))) * self.b
+        
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        W, E, R = self.param_groups[0]["params"]
+
+        x_k = self.direction.point
+        x_k = (-self.param_groups[0]["lr"]) * self.direction + SFTuckerRiemannian.TangentVector(x_k)
+        x_k = x_k.construct().round(self.rank)
+
+        W.data.add_(x_k.core - W)
+        R.data.add_(x_k.regular_factors[0] - R)
+        E.data.add_(x_k.shared_factor - E)
+        
+        self.step_t += 1
