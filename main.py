@@ -171,7 +171,7 @@ if __name__ == '__main__':
     dataset = "FB15k-237"
     num_iterations = 500
     batch_size = 2048
-    lr = 1e9
+    lr = 1e6
     dr = 0.995
     edim = 200
     rdim = 200
