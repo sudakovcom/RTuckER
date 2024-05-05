@@ -79,9 +79,9 @@ class SGD(Optimizer):
         x_k = x_k.construct().round(self.rank)
 
         W.data.add_(x_k.core - W)
-        S.data.add_(x_k.regular_factors[0] - S)
-        R.data.add_(x_k.regular_factors[1] - R)
-        O.data.add_(x_k.regular_factors[2] - O)
+        S.data.add_(x_k.factors[0] - S)
+        R.data.add_(x_k.factors[1] - R)
+        O.data.add_(x_k.factors[2] - O)
 
 
 class Adam(Optimizer):
@@ -127,8 +127,8 @@ class Adam(Optimizer):
         x_k = x_k.construct().round(self.rank)
 
         W.data.add_(x_k.core - W)
-        S.data.add_(x_k.regular_factors[0] - S)
-        R.data.add_(x_k.regular_factors[1] - R)
-        O.data.add_(x_k.regular_factors[2] - O)
+        S.data.add_(x_k.factors[0] - S)
+        R.data.add_(x_k.factors[1] - R)
+        O.data.add_(x_k.factors[2] - O)
         
         self.step_t += 1

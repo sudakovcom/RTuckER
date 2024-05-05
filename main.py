@@ -7,8 +7,6 @@ from collections import defaultdict
 from shared_model import *
 from torch.optim.lr_scheduler import ExponentialLR
 
-from shared_model import SFTuckER, SGD, Adam
-
 
 def get_loss_fn(e_idx, r_idx, targets, criterion, symmetric, regularization):
         def loss_fn(T: SFTucker):
@@ -16,8 +14,8 @@ def get_loss_fn(e_idx, r_idx, targets, criterion, symmetric, regularization):
                 relations = T.regular_factors[0][r_idx, :]
                 subjects = T.shared_factor[e_idx, :]
             else:
-                relations = T.factors[0][r_idx, :]
-                subjects = T.factors[1][e_idx, :]
+                relations = T.factors[1][r_idx, :]
+                subjects = T.factors[0][e_idx, :]
                 
             preds = torch.einsum("abc,da->dbc", T.core, relations)
             preds = torch.bmm(subjects.view(-1, 1, subjects.shape[1]), preds).view(-1, subjects.shape[1])
@@ -32,7 +30,7 @@ def get_loss_fn(e_idx, r_idx, targets, criterion, symmetric, regularization):
             mask0 = 1 - targets
             loss = criterion(preds, targets)
             loss = (loss*mask0/2 + loss*mask1)*4/3
-            return loss + T.norm()*regularization
+            return loss.mean() + T.norm()*regularization
 
         return loss_fn
 
@@ -131,7 +129,7 @@ class Experiment:
             from shared_model import SFTuckER, SGD, Adam
             model = SFTuckER(d, self.ent_vec_dim, self.rel_vec_dim)
         else:
-            from shared_model import TuckER, SGD, Adam
+            from model import TuckER, SGD, Adam
             model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim)
 
         model.init()
@@ -160,7 +158,7 @@ class Experiment:
                 loss_fn = get_loss_fn(e1_idx, r_idx, targets, model.criterion, self.symmetric, self.regularization)
                 opt.fit(loss_fn, model)
                 opt.step()
-                wandb.log({'T norm': model.T.norm()})
+                wandb.log({'W norm': model.W.norm()})
                 opt.zero_grad(set_to_none=True)
 
                 loss = opt.loss.detach()
