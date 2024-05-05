@@ -14,8 +14,8 @@ def get_loss_fn(e_idx, r_idx, targets, criterion, symmetric, regularization):
                 relations = T.regular_factors[0][r_idx, :]
                 subjects = T.shared_factor[e_idx, :]
             else:
-                relations = T.factors[1][r_idx, :]
-                subjects = T.factors[0][e_idx, :]
+                relations = T.factors[0][r_idx, :]
+                subjects = T.factors[1][e_idx, :]
                 
             preds = torch.einsum("abc,da->dbc", T.core, relations)
             preds = torch.bmm(subjects.view(-1, 1, subjects.shape[1]), preds).view(-1, subjects.shape[1])
@@ -188,7 +188,7 @@ if __name__ == '__main__':
     batch_size = 2048
     lr = 1e6
     dr = 0.995
-    edim = 200
+    edim = 40
     rdim = 200
     label_smoothing = 0.1
     regularization = 1e-8

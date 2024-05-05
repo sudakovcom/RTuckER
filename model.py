@@ -53,7 +53,7 @@ class SGD(Optimizer):
 
 
     def fit(self, loss_fn, model: TuckerRiemannian):
-        x_k = Tucker(model.W.data, [model.S.data, model.R.data, model.O.data])
+        x_k = Tucker(model.W.data, [model.R.data, model.S.data, model.O.data])
         rgrad, self.loss = TuckerRiemannian.grad(loss_fn, x_k)
 
         if self.momentum != 0:
@@ -79,8 +79,8 @@ class SGD(Optimizer):
         x_k = x_k.construct().round(self.rank)
 
         W.data.add_(x_k.core - W)
-        S.data.add_(x_k.factors[0] - S)
-        R.data.add_(x_k.factors[1] - R)
+        S.data.add_(x_k.factors[1] - S)
+        R.data.add_(x_k.factors[0] - R)
         O.data.add_(x_k.factors[2] - O)
 
 
@@ -101,7 +101,7 @@ class Adam(Optimizer):
         super().__init__(params, defaults)
 
     def fit(self, loss_fn, model: TuckerRiemannian):
-        x_k = Tucker(model.W.data, [model.S.data, model.R.data, model.O.data])
+        x_k = Tucker(model.W.data, [model.R.data, model.S.data, model.O.data])
         rgrad, self.loss = TuckerRiemannian.grad(loss_fn, x_k)
         rgrad_norm = rgrad.norm()
         
@@ -127,8 +127,8 @@ class Adam(Optimizer):
         x_k = x_k.construct().round(self.rank)
 
         W.data.add_(x_k.core - W)
-        S.data.add_(x_k.factors[0] - S)
-        R.data.add_(x_k.factors[1] - R)
+        S.data.add_(x_k.factors[1] - S)
+        R.data.add_(x_k.factors[0] - R)
         O.data.add_(x_k.factors[2] - O)
         
         self.step_t += 1
