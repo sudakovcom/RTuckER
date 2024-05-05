@@ -17,7 +17,13 @@ def get_loss_fn(e_idx, r_idx, targets, criterion):
         preds = torch.einsum("abc,da->dbc", T.core, relations)
         preds = torch.bmm(subjects.view(-1, 1, subjects.shape[1]), preds).view(-1, subjects.shape[1])
         preds = preds @ T.shared_factor.T
-        return criterion(torch.sigmoid(preds), targets)
+        torch.sigmoid(preds)
+
+        mask1 = targets
+        mask0 = 1 - targets
+        loss = criterion(preds, targets)
+        loss = (loss*mask0/2 + loss*mask1)*4/3
+        return loss + T.norm()*1e-8
 
     return loss_fn
 

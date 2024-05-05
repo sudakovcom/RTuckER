@@ -23,9 +23,6 @@ class SFTuckER:
     def init(self):
         xavier_normal_(self.E.data)
         xavier_normal_(self.R.data)
-        # with torch.no_grad():
-        #     self.E.weight.data = torch.linalg.qr(self.E.weight)[0]
-        #     self.R.weight.data = torch.linalg.qr(self.R.weight)[0]
 
     def forward(self, e_idx, r_idx):
         relations = self.R[r_idx, :]
@@ -92,7 +89,7 @@ class SGD(Optimizer):
 class Adam(Optimizer):
     def __init__(self, params, rank, max_lr, betas=(0.9, 0.99), eps=1e-8):
         self.rank = rank
-        self.lr = lr
+        self.lr = max_lr
         self.betas = betas
         self.eps = eps
         
