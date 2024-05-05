@@ -7,31 +7,41 @@ from collections import defaultdict
 from shared_model import *
 from torch.optim.lr_scheduler import ExponentialLR
 
-from shared_model import SFTuckER, SGD
+from shared_model import SFTuckER, SGD, Adam
 
 
-def get_loss_fn(e_idx, r_idx, targets, criterion):
-    def loss_fn(T: SFTucker):
-        relations = T.regular_factors[0][r_idx, :]
-        subjects = T.shared_factor[e_idx, :]
-        preds = torch.einsum("abc,da->dbc", T.core, relations)
-        preds = torch.bmm(subjects.view(-1, 1, subjects.shape[1]), preds).view(-1, subjects.shape[1])
-        preds = preds @ T.shared_factor.T
-        torch.sigmoid(preds)
+def get_loss_fn(e_idx, r_idx, targets, criterion, symmetric, regularization):
+        def loss_fn(T: SFTucker):
+            if symmetric:
+                relations = T.regular_factors[0][r_idx, :]
+                subjects = T.shared_factor[e_idx, :]
+            else:
+                relations = T.factors[0][r_idx, :]
+                subjects = T.factors[1][e_idx, :]
+                
+            preds = torch.einsum("abc,da->dbc", T.core, relations)
+            preds = torch.bmm(subjects.view(-1, 1, subjects.shape[1]), preds).view(-1, subjects.shape[1])
 
-        mask1 = targets
-        mask0 = 1 - targets
-        loss = criterion(preds, targets)
-        loss = (loss*mask0/2 + loss*mask1)*4/3
-        return loss + T.norm()*1e-8
+            if symmetric:
+                preds = preds @ T.shared_factor.T
+            else:
+                preds = preds @ T.factors[2].T
+            preds = torch.sigmoid(preds)
 
-    return loss_fn
+            mask1 = targets
+            mask0 = 1 - targets
+            loss = criterion(preds, targets)
+            loss = (loss*mask0/2 + loss*mask1)*4/3
+            return loss + T.norm()*regularization
+
+        return loss_fn
+
 
 
 class Experiment:
-    def __init__(self, learning_rate=0.0005, ent_vec_dim=200, rel_vec_dim=200,
+    def __init__(self, symmetric = True, learning_rate=0.0005, ent_vec_dim=200, rel_vec_dim=200,
                  num_iterations=500, batch_size=128, decay_rate=0.,
-                 label_smoothing=0.):
+                 label_smoothing=0., regularization = 1e-8):
         self.learning_rate = learning_rate
         self.ent_vec_dim = ent_vec_dim
         self.rel_vec_dim = rel_vec_dim
@@ -39,6 +49,8 @@ class Experiment:
         self.batch_size = batch_size
         self.decay_rate = decay_rate
         self.label_smoothing = label_smoothing
+        self.symmetric = symmetric
+        self.regularization = regularization
 
     def get_data_idxs(self, data):
         data_idxs = [(self.entity_idxs[data[i][0]], self.relation_idxs[data[i][1]], self.entity_idxs[data[i][2]]) for i
@@ -115,11 +127,16 @@ class Experiment:
         train_data_idxs = self.get_data_idxs(d.train_data)
         print("Number of training data points: %d" % len(train_data_idxs))
 
-        model = SFTuckER(d, self.ent_vec_dim, self.rel_vec_dim)
+        if self.symmetric:
+            from shared_model import SFTuckER, SGD, Adam
+            model = SFTuckER(d, self.ent_vec_dim, self.rel_vec_dim)
+        else:
+            from shared_model import TuckER, SGD, Adam
+            model = TuckER(d, self.ent_vec_dim, self.rel_vec_dim)
 
         model.init()
 
-        opt = SGD(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
+        opt = Adam(model.parameters(), (self.rel_vec_dim, self.ent_vec_dim, self.ent_vec_dim), self.learning_rate)
         if self.decay_rate:
             scheduler = ExponentialLR(opt, self.decay_rate)
 
@@ -140,10 +157,10 @@ class Experiment:
                 if self.label_smoothing:
                     targets = ((1.0 - self.label_smoothing) * targets) + (1.0 / targets.size(1))
 
-                loss_fn = get_loss_fn(e1_idx, r_idx, targets, model.criterion)
+                loss_fn = get_loss_fn(e1_idx, r_idx, targets, model.criterion, self.symmetric, self.regularization)
                 opt.fit(loss_fn, model)
                 opt.step()
-                wandb.log({'W norm': model.W.norm(), 'E norm': model.E.norm(), 'R norm': model.R.norm()})
+                wandb.log({'T norm': model.T.norm()})
                 opt.zero_grad(set_to_none=True)
 
                 loss = opt.loss.detach()
@@ -176,6 +193,8 @@ if __name__ == '__main__':
     edim = 200
     rdim = 200
     label_smoothing = 0.1
+    regularization = 1e-8
+    symmetric = False
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     data_dir = "data/%s/" % dataset
@@ -189,6 +208,6 @@ if __name__ == '__main__':
 
     run = wandb.init(project="RTuckER")
 
-    experiment = Experiment(num_iterations=num_iterations, batch_size=batch_size, learning_rate=lr,
-                            decay_rate=dr, ent_vec_dim=edim, rel_vec_dim=rdim, label_smoothing=label_smoothing)
+    experiment = Experiment(symmetric = symmetric, num_iterations=num_iterations, batch_size=batch_size, learning_rate=lr,
+                            decay_rate=dr, ent_vec_dim=edim, rel_vec_dim=rdim, label_smoothing=label_smoothing, regularization = regularization)
     experiment.train_and_eval()
