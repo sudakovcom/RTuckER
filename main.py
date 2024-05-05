@@ -4,10 +4,10 @@ import torch
 import time
 import wandb
 from collections import defaultdict
-from model import *
+from shared_model import *
 from torch.optim.lr_scheduler import ExponentialLR
 
-from model import SFTuckER, SGD
+from shared_model import SFTuckER, SGD
 
 
 def get_loss_fn(e_idx, r_idx, targets, criterion):
